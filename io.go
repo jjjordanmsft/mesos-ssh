@@ -11,9 +11,10 @@ type IOCollector interface {
 }
 
 type RemoteIO interface {
-	OnStdout(data []byte)
-	OnStderr(data []byte)
-	OnExit(status int)
+	Stdout(data []byte)
+	Stderr(data []byte)
+	Exit(status int)
+	Done(err error)
 }
 
 type stdoutWriter struct {
@@ -21,7 +22,7 @@ type stdoutWriter struct {
 }
 
 func (writer *stdoutWriter) Write(p []byte) (int, error) {
-	writer.remote.OnStdout(p)
+	writer.remote.Stdout(p)
 	return len(p), nil
 }
 
@@ -30,7 +31,7 @@ type stderrWriter struct {
 }
 
 func (writer *stderrWriter) Write(p []byte) (int, error) {
-	writer.remote.OnStderr(p)
+	writer.remote.Stderr(p)
 	return len(p), nil
 }
 
@@ -47,14 +48,14 @@ type IOMessage struct {
 type IOResult struct {
 	host   string
 	msgs   []*IOMessage
-	result int
+	result error
 }
 
 type RegularRemoteIO struct {
 	host       string
 	collector  chan *IOMessage
-	exit       chan int
 	controller chan *IOResult
+	done       chan error
 }
 
 func NewRegularIOCollector() IOCollector {
@@ -69,7 +70,7 @@ func (coll *RegularIOCollector) NewRemote(host string) RemoteIO {
 	remote := &RegularRemoteIO{
 		host:       host,
 		collector:  make(chan *IOMessage),
-		exit:       make(chan int),
+		done:       make(chan error),
 		controller: coll.results,
 	}
 
@@ -88,21 +89,23 @@ func (coll *RegularIOCollector) Read() {
 		for _, x := range result.msgs {
 			fmt.Printf("%s", x.data)
 		}
-		fmt.Printf("==> Result was: %d\n", result.result)
+		if result.result != nil {
+			fmt.Printf("==> Failed with %s\n", result.result.Error())
+		}
 		recvd++
 	}
 }
 
 func (remote *RegularRemoteIO) process() {
 	var msgs []*IOMessage
-	var result int
+	var result error
 wait:
 	for {
 		select {
 		case msg := <-remote.collector:
 			msgs = append(msgs, msg)
-		case code := <-remote.exit:
-			result = code
+		case err := <-remote.done:
+			result = err
 			break wait
 		}
 	}
@@ -132,20 +135,27 @@ wait2:
 	}
 }
 
-func (remote *RegularRemoteIO) OnStdout(data []byte) {
+func (remote *RegularRemoteIO) Stdout(data []byte) {
 	remote.collector <- &IOMessage{
 		data:   string(data),
 		stream: 1,
 	}
 }
 
-func (remote *RegularRemoteIO) OnStderr(data []byte) {
+func (remote *RegularRemoteIO) Stderr(data []byte) {
 	remote.collector <- &IOMessage{
 		data:   string(data),
 		stream: 2,
 	}
 }
 
-func (remote *RegularRemoteIO) OnExit(code int) {
-	remote.exit <- code
+func (remote *RegularRemoteIO) Exit(code int) {
+	remote.collector <- &IOMessage{
+		data:   fmt.Sprintf("Exited with code: %d\n", code),
+		stream: -1,
+	}
+}
+
+func (remote *RegularRemoteIO) Done(err error) {
+	remote.done <- err
 }

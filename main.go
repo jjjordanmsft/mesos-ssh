@@ -10,6 +10,7 @@ import (
 	"os/user"
 	"strings"
 	"sync"
+	"time"
 )
 
 var (
@@ -18,6 +19,9 @@ var (
 	flagMesos    string
 	flagDebug    bool
 	flagUser     string
+	flagPort     int
+	flagPty      bool
+	flagTimeout  time.Duration
 )
 
 func init() {
@@ -26,18 +30,29 @@ func init() {
 		defaultUser = user_.Username
 	}
 
-	flag.BoolVar(&flagSudo, "sudo", false, "Run commands as superuser on the remote machine")
-	flag.IntVar(&flagParallel, "m", 4, "How many sessions to run in parallel")
-	flag.StringVar(&flagMesos, "mesos", "http://leader.mesos:5050", "Address of Mesos leader")
 	flag.BoolVar(&flagDebug, "debug", false, "Write debug output")
+
+	flag.StringVar(&flagMesos, "mesos", "http://leader.mesos:5050", "Address of Mesos leader")
+	flag.IntVar(&flagParallel, "m", 4, "How many sessions to run in parallel")
 	flag.StringVar(&flagUser, "user", defaultUser, "Remote username")
+	flag.IntVar(&flagPort, "port", 22, "SSH port")
+	flag.BoolVar(&flagSudo, "sudo", false, "Run commands as superuser on the remote machine")
+	flag.BoolVar(&flagPty, "pty", false, "Run command in a pty (automatically applied with -sudo)")
+	flag.DurationVar(&flagTimeout, "timeout", time.Minute, "Timeout for remote command")
+
+	flag.Usage = usage
+}
+
+func usage() {
+	fmt.Printf("Usage: %s [OPTIONS] <masters|public|private|agents|all> <cmd>\n", os.Args[0])
+	flag.PrintDefaults()
 }
 
 func main() {
 	flag.Parse()
 	args := flag.Args()
 	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "Must specify 'machines' and 'cmd' on the commandline")
+		flag.Usage()
 		os.Exit(2)
 	}
 
@@ -69,9 +84,11 @@ func main() {
 	sem := make(chan bool, flagParallel)
 	var wg sync.WaitGroup
 
+	cmd := NewSSHCommand(args[1], flagSudo, flagPty, flagTimeout)
+
 	for _, host := range hosts {
-		h := host
-		remote := coll.NewRemote(h)
+		remote := coll.NewRemote(host)
+		ssh := NewSSHSessionPassword(host, flagUser, string(pw), remote)
 		go func() {
 			wg.Add(1)
 			<-sem
@@ -80,7 +97,13 @@ func main() {
 				wg.Done()
 			}()
 
-			RunSSH(h, flagUser, string(pw), args[1], flagSudo, msgs, remote)
+			if err := ssh.Connect(flagPort); err != nil {
+				remote.Done(err)
+				return
+			}
+
+			remote.Done(ssh.Run(cmd))
+			ssh.Close()
 		}()
 	}
 
