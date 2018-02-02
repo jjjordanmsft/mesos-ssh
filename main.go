@@ -14,14 +14,15 @@ import (
 )
 
 var (
-	flagSudo     bool
-	flagParallel int
-	flagMesos    string
-	flagDebug    bool
-	flagUser     string
-	flagPort     int
-	flagPty      bool
-	flagTimeout  time.Duration
+	flagSudo       bool
+	flagParallel   int
+	flagMesos      string
+	flagDebug      bool
+	flagUser       string
+	flagPort       int
+	flagPty        bool
+	flagInterleave bool
+	flagTimeout    time.Duration
 )
 
 func init() {
@@ -39,6 +40,7 @@ func init() {
 	flag.BoolVar(&flagSudo, "sudo", false, "Run commands as superuser on the remote machine")
 	flag.BoolVar(&flagPty, "pty", false, "Run command in a pty (automatically applied with -sudo)")
 	flag.DurationVar(&flagTimeout, "timeout", time.Minute, "Timeout for remote command")
+	flag.BoolVar(&flagInterleave, "interleave", false, "Interleave output from each session rather than wait for it to finish")
 
 	flag.Usage = usage
 }
@@ -79,7 +81,12 @@ func main() {
 	fmt.Println()
 	log.Printf("Read password of length %d", len(pw))
 
-	coll := NewRegularIOCollector()
+	var coll IOCollector
+	if flagInterleave {
+		coll = NewInterleavedIOCollector()
+	} else {
+		coll = NewRegularIOCollector()
+	}
 
 	sem := make(chan bool, flagParallel)
 	var wg sync.WaitGroup

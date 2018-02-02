@@ -20,7 +20,7 @@ type SSHCommand struct {
 type SSHSession struct {
 	Host   string
 	Config *ssh.ClientConfig
-	Remote RemoteIO
+	Remote *RemoteIO
 
 	connection *ssh.Client
 	password   string
@@ -35,7 +35,7 @@ func NewSSHCommand(cmd string, sudo, pty bool, timeout time.Duration) *SSHComman
 	}
 }
 
-func NewSSHSessionPassword(host, user, pw string, remote RemoteIO) *SSHSession {
+func NewSSHSessionPassword(host, user, pw string, remote *RemoteIO) *SSHSession {
 	session := NewSSHSession(host, UserPass(user, pw), remote)
 	session.password = pw
 	return session
@@ -53,7 +53,7 @@ func UserPass(user, pw string) *ssh.ClientConfig {
 	}
 }
 
-func NewSSHSession(host string, config *ssh.ClientConfig, remote RemoteIO) *SSHSession {
+func NewSSHSession(host string, config *ssh.ClientConfig, remote *RemoteIO) *SSHSession {
 	return &SSHSession{
 		Host:   host,
 		Config: config,
