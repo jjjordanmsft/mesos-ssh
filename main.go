@@ -129,6 +129,7 @@ func main() {
 	// Wait for all to be done.
 	log.Println("Waiting for completion")
 	wg.Wait()
+	close(sem)
 }
 
 func getHosts(spec string, msgs *log.Logger) ([]string, error) {

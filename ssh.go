@@ -292,5 +292,7 @@ func (sesh *SSHSession) sendFiles(dir string, files []string) error {
 		err = sendErr
 	}
 
+	close(result)
+
 	return err
 }

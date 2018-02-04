@@ -8,6 +8,9 @@ import (
 	"time"
 )
 
+// Time to wait for remaining IO after process exit.
+const deadline time.Duration = 100 * time.Millisecond
+
 type IOCollector interface {
 	NewRemote(host string) *RemoteIO
 	Read()
@@ -113,6 +116,8 @@ func (coll *RegularIOCollector) Read() {
 		}
 		recvd++
 	}
+
+	close(coll.results)
 }
 
 func (coll *RegularIOCollector) process(remote *RemoteIO) {
@@ -129,8 +134,7 @@ wait:
 		}
 	}
 
-	// Give the data streams up to 250ms to finish sending.
-	deadline := 250 * time.Millisecond
+	// Give the data streams some time to finish sending.
 	t := time.NewTimer(deadline)
 wait2:
 	for {
@@ -152,6 +156,9 @@ wait2:
 		host:   remote.host,
 		result: result,
 	}
+
+	close(remote.collector)
+	close(remote.done)
 }
 
 type InterleavedIOCollector struct {
@@ -184,6 +191,8 @@ func (coll *InterleavedIOCollector) Read() {
 		case msg := <-coll.messages:
 			fmt.Println(msg.data)
 		case <-done:
+			close(coll.messages)
+			close(done)
 			return
 		}
 	}
@@ -219,8 +228,7 @@ wait:
 		}
 	}
 
-	// Give the data streams up to 250ms to finish sending.
-	deadline := 250 * time.Millisecond
+	// Give the data streams some time to finish sending.
 	t := time.NewTimer(deadline)
 wait2:
 	for {
@@ -245,6 +253,8 @@ wait2:
 	}
 
 	proc.flush()
+	close(proc.remote.collector)
+	close(proc.remote.done)
 }
 
 func (proc *interleavedProcessor) handle(msg *IOMessage) {
