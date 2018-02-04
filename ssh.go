@@ -7,6 +7,9 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
+	"path"
+	"strings"
 	"time"
 )
 
@@ -15,6 +18,7 @@ type SSHCommand struct {
 	Sudo    bool
 	Pty     bool
 	Timeout time.Duration
+	Files   []string
 }
 
 type SSHSession struct {
@@ -26,12 +30,13 @@ type SSHSession struct {
 	password   string
 }
 
-func NewSSHCommand(cmd string, sudo, pty bool, timeout time.Duration) *SSHCommand {
+func NewSSHCommand(cmd string, sudo, pty bool, timeout time.Duration, files []string) *SSHCommand {
 	return &SSHCommand{
 		Command: cmd,
 		Sudo:    sudo,
 		Pty:     pty,
 		Timeout: timeout,
+		Files:   files,
 	}
 }
 
@@ -78,6 +83,24 @@ func (sesh *SSHSession) Close() {
 }
 
 func (sesh *SSHSession) Run(cmd *SSHCommand) error {
+	if len(cmd.Files) > 0 {
+		tmpdir, err := sesh.mktemp()
+		if err != nil {
+			return err
+		}
+
+		defer sesh.deltemp(tmpdir)
+		if err := sesh.sendFiles(tmpdir, cmd.Files); err != nil {
+			return err
+		}
+
+		return sesh.runCommand(cmd, tmpdir)
+	} else {
+		return sesh.runCommand(cmd, "")
+	}
+}
+
+func (sesh *SSHSession) runCommand(cmd *SSHCommand, dir string) error {
 	log.Printf("Initiating session on %s", sesh.Host)
 	session, err := sesh.connection.NewSession()
 	if err != nil {
@@ -113,6 +136,11 @@ func (sesh *SSHSession) Run(cmd *SSHCommand) error {
 		session.Close()
 	})
 
+	shcmd := cmd.Command
+	if dir != "" {
+		shcmd = fmt.Sprintf("cd %s; %s", dir, shcmd)
+	}
+
 	var cmdErr error
 	if cmd.Sudo {
 		stdin, err := session.StdinPipe()
@@ -124,13 +152,13 @@ func (sesh *SSHSession) Run(cmd *SSHCommand) error {
 		go io.Copy(&stderrWriter{sesh.Remote}, stderr)
 
 		log.Printf("Invoking cmd on %s", sesh.Host)
-		cmdErr = session.Run(fmt.Sprintf("/usr/bin/sudo /bin/bash -c '%s'", cmd.Command))
+		cmdErr = session.Run(fmt.Sprintf("/usr/bin/sudo /bin/bash -c '%s'", shcmd))
 	} else {
 		go io.Copy(&stdoutWriter{sesh.Remote}, stdout)
 		go io.Copy(&stderrWriter{sesh.Remote}, stderr)
 
 		log.Printf("Invoking cmd on %s", sesh.Host)
-		cmdErr = session.Run(cmd.Command)
+		cmdErr = session.Run(shcmd)
 	}
 
 	timeout.Stop()
@@ -152,7 +180,7 @@ func (sesh *SSHSession) Run(cmd *SSHCommand) error {
 	}
 }
 
-func (sesh *SSHSession) writePass(stdin io.Writer, stdout io.Reader) {
+func (sesh *SSHSession) writePass(stdin io.WriteCloser, stdout io.Reader) {
 	var buf bytes.Buffer
 	sect := make([]byte, 32)
 
@@ -180,5 +208,89 @@ func (sesh *SSHSession) writePass(stdin io.Writer, stdout io.Reader) {
 		}
 	}
 
+	stdin.Close()
 	io.Copy(&stdoutWriter{sesh.Remote}, stdout)
+}
+
+func (sesh *SSHSession) mktemp() (string, error) {
+	log.Printf("Creating temporary directory on %s", sesh.Host)
+	session, err := sesh.connection.NewSession()
+	if err != nil {
+		return "", err
+	}
+
+	defer session.Close()
+
+	result, err := session.CombinedOutput("mktemp -d")
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimRight(string(result), "\r\n"), nil
+}
+
+func (sesh *SSHSession) deltemp(dir string) error {
+	log.Printf("Removing temporary directory on %s", sesh.Host)
+	session, err := sesh.connection.NewSession()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+	return session.Run("rm -rf " + dir)
+}
+
+func (sesh *SSHSession) sendFiles(dir string, files []string) error {
+	log.Printf("Preparing to send files to %s", sesh.Host)
+	session, err := sesh.connection.NewSession()
+	if err != nil {
+		return err
+	}
+
+	defer session.Close()
+
+	stdin, err := session.StdinPipe()
+	if err != nil {
+		return err
+	}
+
+	result := make(chan error, 1)
+
+	go func() {
+		defer stdin.Close()
+		for _, file := range files {
+			log.Printf("Sending %s to %s", file, sesh.Host)
+			f, err := os.Open(file)
+			if err != nil {
+				log.Printf("Failed to open %s: %s", file, err.Error())
+				result <- err
+				return
+			}
+
+			info, err := f.Stat()
+			if err != nil {
+				log.Printf("Failed to stat %s: %s", file, err.Error())
+				result <- err
+				return
+			}
+
+			fmt.Fprintf(stdin, "C%04o %d %s\n", info.Mode().Perm(), info.Size(), path.Base(file))
+			io.Copy(stdin, f)
+			fmt.Fprintf(stdin, "\x00")
+		}
+
+		result <- nil
+	}()
+
+	out, err := session.CombinedOutput(fmt.Sprintf("/usr/bin/scp -tr %s", dir))
+	if err != nil {
+		log.Printf("File copy failed on %s [%s] remote: %s", sesh.Host, err.Error(), out)
+	}
+
+	sendErr := <-result
+	if err == nil {
+		err = sendErr
+	}
+
+	return err
 }

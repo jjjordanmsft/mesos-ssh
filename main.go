@@ -22,6 +22,7 @@ var (
 	flagPort       int
 	flagPty        bool
 	flagInterleave bool
+	flagFiles      FileList
 	flagTimeout    time.Duration
 )
 
@@ -41,6 +42,7 @@ func init() {
 	flag.BoolVar(&flagPty, "pty", false, "Run command in a pty (automatically applied with -sudo)")
 	flag.DurationVar(&flagTimeout, "timeout", time.Minute, "Timeout for remote command")
 	flag.BoolVar(&flagInterleave, "interleave", false, "Interleave output from each session rather than wait for it to finish")
+	flag.Var(&flagFiles, "f", "Send specified file to a temporary directory before running the command.\n\tThe command will be invoked from inside the temporary directory, and the\n\tdirectory will be deleted after execution is completed.  This can be\n\tspecified multiple times.")
 
 	flag.Usage = usage
 }
@@ -91,7 +93,7 @@ func main() {
 	sem := make(chan bool, flagParallel)
 	var wg sync.WaitGroup
 
-	cmd := NewSSHCommand(args[1], flagSudo, flagPty, flagTimeout)
+	cmd := NewSSHCommand(args[1], flagSudo, flagPty, flagTimeout, flagFiles)
 
 	for _, host := range hosts {
 		remote := coll.NewRemote(host)
@@ -189,4 +191,22 @@ func hasPublicResource(agent *MesosAgent) bool {
 	}
 
 	return false
+}
+
+type FileList []string
+
+func (list *FileList) String() string {
+	return strings.Join(*list, "; ")
+}
+
+func (list *FileList) Set(s string) error {
+	// Check whether file exists and is accessible.
+	if file, err := os.Open(s); err != nil {
+		return err
+	} else {
+		file.Close()
+	}
+
+	*list = append(*list, s)
+	return nil
 }
