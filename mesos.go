@@ -9,6 +9,47 @@ import (
 	"net/http"
 )
 
+func GetHosts(mesos, spec string, msgs *log.Logger) ([]string, error) {
+	if spec == "masters" {
+		return getMasters()
+	}
+
+	var result []string
+	mesosClient, err := discoverMesos(mesos, msgs)
+	if err != nil {
+		return result, err
+	}
+
+	agents, err := mesosClient.GetAgents()
+	if err != nil {
+		return result, err
+	}
+
+	if spec == "agents" || spec == "all" {
+		result, err = filterAgents(agents, func(ag *MesosAgent) bool { return true }), nil
+		if err != nil {
+			return result, err
+		}
+
+		if spec == "all" {
+			masters, err := getMasters()
+			if err != nil {
+				return result, err
+			}
+
+			result = append(result, masters...)
+		}
+
+		return result, nil
+	} else if spec == "public" {
+		return filterAgents(agents, hasPublicResource), nil
+	} else if spec == "private" {
+		return filterAgents(agents, func(ag *MesosAgent) bool { return !hasPublicResource(ag) }), nil
+	} else {
+		return result, fmt.Errorf("Invalid host spec: %s", spec)
+	}
+}
+
 type MesosClient struct {
 	endpoint string
 }
@@ -35,7 +76,7 @@ func (client *MesosClient) GetVersion() (*MesosVersionResponse, error) {
 	}
 }
 
-func GetMasters() ([]string, error) {
+func getMasters() ([]string, error) {
 	return net.LookupHost("master.mesos")
 }
 
@@ -72,7 +113,7 @@ func (client *MesosClient) makeRequest(request *MesosRequest) (*MesosResponse, e
 	return result, nil
 }
 
-func DiscoverMesos(mesosUri string, msgs *log.Logger) (*MesosClient, error) {
+func discoverMesos(mesosUri string, msgs *log.Logger) (*MesosClient, error) {
 	if mesosUri != "" {
 		client := NewMesosClient(mesosUri)
 		_, err := client.GetVersion()
@@ -104,4 +145,25 @@ func DiscoverMesos(mesosUri string, msgs *log.Logger) (*MesosClient, error) {
 	} else {
 		return nil, fmt.Errorf("Failed checking leader.mesos:5050: %s", err.Error())
 	}
+}
+
+func filterAgents(resp *MesosAgentsResponse, f func(agent *MesosAgent) bool) []string {
+	var result []string
+	for _, agent := range resp.Agents {
+		if f(agent) {
+			result = append(result, agent.AgentInfo.Hostname)
+		}
+	}
+
+	return result
+}
+
+func hasPublicResource(agent *MesosAgent) bool {
+	for _, resource := range agent.AgentInfo.Resources {
+		if resource.Role == "slave_public" {
+			return true
+		}
+	}
+
+	return false
 }

@@ -67,7 +67,7 @@ func main() {
 	}
 
 	msgs := log.New(os.Stderr, "mesos-ssh", log.LstdFlags)
-	hosts, err := getHosts(args[0], msgs)
+	hosts, err := GetHosts(flagMesos, args[0], msgs)
 	if err != nil {
 		msgs.Fatalf("Failed to find hosts: %s", err.Error())
 	}
@@ -130,68 +130,6 @@ func main() {
 	log.Println("Waiting for completion")
 	wg.Wait()
 	close(sem)
-}
-
-func getHosts(spec string, msgs *log.Logger) ([]string, error) {
-	if spec == "masters" {
-		return GetMasters()
-	}
-
-	var result []string
-	mesosClient, err := DiscoverMesos(flagMesos, msgs)
-	if err != nil {
-		return result, err
-	}
-
-	agents, err := mesosClient.GetAgents()
-	if err != nil {
-		return result, err
-	}
-
-	if spec == "agents" || spec == "all" {
-		result, err = filterAgents(agents, func(ag *MesosAgent) bool { return true }), nil
-		if err != nil {
-			return result, err
-		}
-
-		if spec == "all" {
-			masters, err := GetMasters()
-			if err != nil {
-				return result, err
-			}
-
-			result = append(result, masters...)
-		}
-
-		return result, nil
-	} else if spec == "public" {
-		return filterAgents(agents, hasPublicResource), nil
-	} else if spec == "private" {
-		return filterAgents(agents, func(ag *MesosAgent) bool { return !hasPublicResource(ag) }), nil
-	} else {
-		return result, fmt.Errorf("Invalid host spec: %s", spec)
-	}
-}
-
-func filterAgents(resp *MesosAgentsResponse, f func(agent *MesosAgent) bool) []string {
-	var result []string
-	for _, agent := range resp.Agents {
-		if f(agent) {
-			result = append(result, agent.AgentInfo.Hostname)
-		}
-	}
-
-	return result
-}
-
-func hasPublicResource(agent *MesosAgent) bool {
-	for _, resource := range agent.AgentInfo.Resources {
-		if resource.Role == "slave_public" {
-			return true
-		}
-	}
-
-	return false
 }
 
 type FileList []string
