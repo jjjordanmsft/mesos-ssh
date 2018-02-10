@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"golang.org/x/crypto/ssh/terminal"
 	"io/ioutil"
 	"log"
 	"os"
@@ -14,16 +13,19 @@ import (
 )
 
 var (
-	flagSudo       bool
-	flagParallel   int
-	flagMesos      string
-	flagDebug      bool
-	flagUser       string
-	flagPort       int
-	flagPty        bool
-	flagInterleave bool
-	flagFiles      FileList
-	flagTimeout    time.Duration
+	flagSudo         bool
+	flagParallel     int
+	flagMesos        string
+	flagDebug        bool
+	flagUser         string
+	flagPort         int
+	flagPty          bool
+	flagInterleave   bool
+	flagKeyfile      string
+	flagForwardAgent bool
+	flagNoAgent      bool
+	flagFiles        FileList
+	flagTimeout      time.Duration
 )
 
 func init() {
@@ -33,11 +35,13 @@ func init() {
 	}
 
 	flag.BoolVar(&flagDebug, "debug", false, "Write debug output")
-
 	flag.StringVar(&flagMesos, "mesos", "http://leader.mesos:5050", "Address of Mesos leader")
 	flag.IntVar(&flagParallel, "m", 4, "How many sessions to run in parallel")
 	flag.StringVar(&flagUser, "user", defaultUser, "Remote username")
 	flag.IntVar(&flagPort, "port", 22, "SSH port")
+	flag.BoolVar(&flagForwardAgent, "forward-agent", false, "Forwards the local SSH agent to the remote host")
+	flag.StringVar(&flagKeyfile, "key", "", "Use the specified keyfile to authenticate to the remote host")
+	flag.BoolVar(&flagNoAgent, "no-agent", false, "Do not use the local ssh agent to authenticate remotely")
 	flag.BoolVar(&flagSudo, "sudo", false, "Run commands as superuser on the remote machine")
 	flag.BoolVar(&flagPty, "pty", false, "Run command in a pty (automatically applied with -sudo)")
 	flag.DurationVar(&flagTimeout, "timeout", time.Minute, "Timeout for remote command")
@@ -74,14 +78,10 @@ func main() {
 
 	log.Printf("Found hosts: %s", strings.Join(hosts, ", "))
 
-	fmt.Printf("Password:")
-	pw, err := terminal.ReadPassword(0)
+	auth, err := NewAuth(flagKeyfile, flagForwardAgent, !flagNoAgent)
 	if err != nil {
-		msgs.Fatalf("Failed to read password: %s", err.Error())
+		msgs.Fatalf("Failed to initialize auth: %s", err.Error())
 	}
-
-	fmt.Println()
-	log.Printf("Read password of length %d", len(pw))
 
 	var coll IOCollector
 	if flagInterleave {
@@ -93,11 +93,11 @@ func main() {
 	sem := make(chan bool, flagParallel)
 	var wg sync.WaitGroup
 
-	cmd := NewSSHCommand(args[1], flagSudo, flagPty, flagTimeout, flagFiles)
+	cmd := NewSSHCommand(args[1], flagSudo, flagPty, flagForwardAgent, flagTimeout, flagFiles)
 
 	for _, host := range hosts {
 		remote := coll.NewRemote(host)
-		ssh := NewSSHSessionPassword(host, flagUser, string(pw), remote)
+		ssh := NewSSHSession(host, flagUser, auth, remote)
 		go func() {
 			wg.Add(1)
 			<-sem

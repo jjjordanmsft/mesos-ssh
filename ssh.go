@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 	"io"
 	"log"
 	"net"
@@ -14,11 +15,12 @@ import (
 )
 
 type SSHCommand struct {
-	Command string
-	Sudo    bool
-	Pty     bool
-	Timeout time.Duration
-	Files   []string
+	Command      string
+	Sudo         bool
+	Pty          bool
+	Timeout      time.Duration
+	Files        []string
+	ForwardAgent bool
 }
 
 type SSHSession struct {
@@ -27,42 +29,31 @@ type SSHSession struct {
 	Remote *RemoteIO
 
 	connection *ssh.Client
-	password   string
+	auth       *Auth
 }
 
-func NewSSHCommand(cmd string, sudo, pty bool, timeout time.Duration, files []string) *SSHCommand {
+func NewSSHCommand(cmd string, sudo, pty, forwardAgent bool, timeout time.Duration, files []string) *SSHCommand {
 	return &SSHCommand{
-		Command: cmd,
-		Sudo:    sudo,
-		Pty:     pty,
-		Timeout: timeout,
-		Files:   files,
+		Command:      cmd,
+		Sudo:         sudo,
+		Pty:          pty,
+		Timeout:      timeout,
+		Files:        files,
+		ForwardAgent: forwardAgent,
 	}
 }
 
-func NewSSHSessionPassword(host, user, pw string, remote *RemoteIO) *SSHSession {
-	session := NewSSHSession(host, UserPass(user, pw), remote)
-	session.password = pw
-	return session
-}
-
-func UserPass(user, pw string) *ssh.ClientConfig {
-	return &ssh.ClientConfig{
-		User: user,
-		Auth: []ssh.AuthMethod{
-			ssh.Password(pw),
-		},
-		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
-			return nil
-		},
-	}
-}
-
-func NewSSHSession(host string, config *ssh.ClientConfig, remote *RemoteIO) *SSHSession {
+func NewSSHSession(host, user string, auth *Auth, remote *RemoteIO) *SSHSession {
 	return &SSHSession{
 		Host:   host,
-		Config: config,
 		Remote: remote,
+		Config: &ssh.ClientConfig{
+			User: user,
+			Auth: auth.getAuthMethods(),
+			HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+				return nil
+			},
+		},
 	}
 }
 
@@ -101,6 +92,12 @@ func (sesh *SSHSession) Run(cmd *SSHCommand) error {
 }
 
 func (sesh *SSHSession) runCommand(cmd *SSHCommand, dir string) error {
+	if cmd.ForwardAgent {
+		if err := sesh.auth.forwardAgent(sesh.connection); err != nil {
+			return err
+		}
+	}
+
 	log.Printf("Initiating session on %s", sesh.Host)
 	session, err := sesh.connection.NewSession()
 	if err != nil {
@@ -108,6 +105,12 @@ func (sesh *SSHSession) runCommand(cmd *SSHCommand, dir string) error {
 	}
 
 	defer session.Close()
+
+	if cmd.ForwardAgent {
+		if err := agent.RequestAgentForwarding(session); err != nil {
+			return err
+		}
+	}
 
 	if cmd.Sudo || cmd.Pty {
 		tmodes := ssh.TerminalModes{
@@ -195,7 +198,13 @@ func (sesh *SSHSession) writePass(stdin io.WriteCloser, stdout io.Reader) {
 		sesh.Remote.Stdout(sect[:n])
 		if bytes.Contains(buf.Bytes(), []byte("[sudo] password for ")) {
 			log.Printf("Responding to password prompt on %s", sesh.Host)
-			stdin.Write([]byte(sesh.password))
+			pw, err := sesh.auth.getPassword()
+			if err != nil {
+				// Welp...
+				break
+			}
+
+			stdin.Write([]byte(pw))
 			stdin.Write([]byte{'\r'})
 			break
 		}
