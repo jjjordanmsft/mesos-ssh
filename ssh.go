@@ -47,6 +47,7 @@ func NewSSHSession(host, user string, auth *Auth, remote *RemoteIO) *SSHSession 
 	return &SSHSession{
 		Host:   host,
 		Remote: remote,
+		auth:   auth,
 		Config: &ssh.ClientConfig{
 			User: user,
 			Auth: auth.getAuthMethods(),
