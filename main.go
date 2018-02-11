@@ -100,7 +100,7 @@ func main() {
 	var wg sync.WaitGroup
 
 	// Configure command
-	cmd := NewSSHCommand(args[1], flagSudo, flagPty, flagForwardAgent, flagTimeout, flagFiles)
+	cmd := NewSSHCommand(strings.Join(args[1:], " "), flagSudo, flagPty, flagForwardAgent, flagTimeout, flagFiles)
 
 	// Start goroutines
 	for _, host := range hosts {
