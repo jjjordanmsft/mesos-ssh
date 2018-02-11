@@ -57,6 +57,7 @@ func usage() {
 }
 
 func main() {
+	// Parse command line
 	flag.Parse()
 	args := flag.Args()
 	if len(args) < 2 {
@@ -64,13 +65,15 @@ func main() {
 		os.Exit(2)
 	}
 
+	// Set up logging
+	msgs := log.New(os.Stderr, "mesos-ssh", log.LstdFlags)
 	if flagDebug {
 		log.SetFlags(log.LstdFlags | log.Lshortfile)
 	} else {
 		log.SetOutput(ioutil.Discard)
 	}
 
-	msgs := log.New(os.Stderr, "mesos-ssh", log.LstdFlags)
+	// Query mesos for IP addresses of target agents
 	hosts, err := GetHosts(flagMesos, args[0], msgs)
 	if err != nil {
 		msgs.Fatalf("Failed to find hosts: %s", err.Error())
@@ -78,11 +81,13 @@ func main() {
 
 	log.Printf("Found hosts: %s", strings.Join(hosts, ", "))
 
+	// Set up authentication
 	auth, err := NewAuth(flagKeyfile, flagForwardAgent, !flagNoAgent)
 	if err != nil {
 		msgs.Fatalf("Failed to initialize auth: %s", err.Error())
 	}
 
+	// Set up output IO
 	var coll IOCollector
 	if flagInterleave {
 		coll = NewInterleavedIOCollector()
@@ -90,22 +95,28 @@ func main() {
 		coll = NewRegularIOCollector()
 	}
 
+	// Semaphore for parallel sessions
 	sem := make(chan bool, flagParallel)
 	var wg sync.WaitGroup
 
+	// Configure command
 	cmd := NewSSHCommand(args[1], flagSudo, flagPty, flagForwardAgent, flagTimeout, flagFiles)
 
+	// Start goroutines
 	for _, host := range hosts {
 		remote := coll.NewRemote(host)
 		ssh := NewSSHSession(host, flagUser, auth, remote)
 		go func() {
+			// Wait on semaphore
 			wg.Add(1)
 			<-sem
 			defer func() {
+				// Release when done
 				sem <- true
 				wg.Done()
 			}()
 
+			// Connection, run command, exit
 			if err := ssh.Connect(flagPort); err != nil {
 				remote.Done(err)
 				return
@@ -132,6 +143,7 @@ func main() {
 	close(sem)
 }
 
+// Data type for -f options
 type FileList []string
 
 func (list *FileList) String() string {

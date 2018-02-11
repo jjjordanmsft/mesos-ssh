@@ -14,6 +14,7 @@ import (
 	"time"
 )
 
+// Command to run on each remote host
 type SSHCommand struct {
 	Command      string
 	Sudo         bool
@@ -23,6 +24,7 @@ type SSHCommand struct {
 	ForwardAgent bool
 }
 
+// A single SSH connection to a remote host
 type SSHSession struct {
 	Host   string
 	Config *ssh.ClientConfig
@@ -32,6 +34,7 @@ type SSHSession struct {
 	auth       *Auth
 }
 
+// Creates an SSHCommand
 func NewSSHCommand(cmd string, sudo, pty, forwardAgent bool, timeout time.Duration, files []string) *SSHCommand {
 	return &SSHCommand{
 		Command:      cmd,
@@ -43,6 +46,7 @@ func NewSSHCommand(cmd string, sudo, pty, forwardAgent bool, timeout time.Durati
 	}
 }
 
+// Creates an (unconnected) SSH client
 func NewSSHSession(host, user string, auth *Auth, remote *RemoteIO) *SSHSession {
 	return &SSHSession{
 		Host:   host,
@@ -58,6 +62,7 @@ func NewSSHSession(host, user string, auth *Auth, remote *RemoteIO) *SSHSession 
 	}
 }
 
+// Initiates the connection for this client
 func (sesh *SSHSession) Connect(port int) error {
 	log.Printf("Starting connection to %s", sesh.Host)
 	connection, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", sesh.Host, port), sesh.Config)
@@ -69,11 +74,13 @@ func (sesh *SSHSession) Connect(port int) error {
 	return nil
 }
 
+// Closes this ssh session
 func (sesh *SSHSession) Close() {
 	sesh.connection.Close()
 	sesh.connection = nil
 }
 
+// Runs the specified SSHCommand
 func (sesh *SSHSession) Run(cmd *SSHCommand) error {
 	if len(cmd.Files) > 0 {
 		tmpdir, err := sesh.mktemp()
@@ -92,6 +99,7 @@ func (sesh *SSHSession) Run(cmd *SSHCommand) error {
 	}
 }
 
+// Runs the actual shell command from the specified directory
 func (sesh *SSHSession) runCommand(cmd *SSHCommand, dir string) error {
 	if cmd.ForwardAgent {
 		if err := sesh.auth.forwardAgent(sesh.connection); err != nil {
@@ -184,6 +192,8 @@ func (sesh *SSHSession) runCommand(cmd *SSHCommand, dir string) error {
 	}
 }
 
+// Waits for sudo password prompt, then writes the password, while forwarding
+// all stdout to the specified io.Reader.
 func (sesh *SSHSession) writePass(stdin io.WriteCloser, stdout io.Reader) {
 	var buf bytes.Buffer
 	sect := make([]byte, 32)
@@ -222,6 +232,7 @@ func (sesh *SSHSession) writePass(stdin io.WriteCloser, stdout io.Reader) {
 	io.Copy(&stdoutWriter{sesh.Remote}, stdout)
 }
 
+// Creates a temporary directory on the remote host.
 func (sesh *SSHSession) mktemp() (string, error) {
 	log.Printf("Creating temporary directory on %s", sesh.Host)
 	session, err := sesh.connection.NewSession()
@@ -239,6 +250,7 @@ func (sesh *SSHSession) mktemp() (string, error) {
 	return strings.TrimRight(string(result), "\r\n"), nil
 }
 
+// Deletes a directory from the remote host.
 func (sesh *SSHSession) deltemp(dir string) error {
 	log.Printf("Removing temporary directory on %s", sesh.Host)
 	session, err := sesh.connection.NewSession()
@@ -250,6 +262,8 @@ func (sesh *SSHSession) deltemp(dir string) error {
 	return session.Run("rm -rf " + dir)
 }
 
+// Sends the specified files to the specified directory on the remote host
+// via scp,  preserving file modes.
 func (sesh *SSHSession) sendFiles(dir string, files []string) error {
 	log.Printf("Preparing to send files to %s", sesh.Host)
 	session, err := sesh.connection.NewSession()

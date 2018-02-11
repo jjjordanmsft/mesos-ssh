@@ -9,6 +9,7 @@ import (
 	"net/http"
 )
 
+// Lookup hosts for "spec" from mesos leader "mesos". Write any output to msgs.
 func GetHosts(mesos, spec string, msgs *log.Logger) ([]string, error) {
 	if spec == "masters" {
 		return getMasters()
@@ -50,6 +51,7 @@ func GetHosts(mesos, spec string, msgs *log.Logger) ([]string, error) {
 	}
 }
 
+// Pared-down mesos client.
 type MesosClient struct {
 	endpoint string
 }
@@ -60,6 +62,7 @@ func NewMesosClient(endpoint string) *MesosClient {
 	}
 }
 
+// Get all agents
 func (client *MesosClient) GetAgents() (*MesosAgentsResponse, error) {
 	if response, err := client.makeRequest(&MesosRequest{Type: "GET_AGENTS"}); err != nil {
 		return nil, err
@@ -68,6 +71,7 @@ func (client *MesosClient) GetAgents() (*MesosAgentsResponse, error) {
 	}
 }
 
+// Get version. Used to check for a Mesos endpoint.
 func (client *MesosClient) GetVersion() (*MesosVersionResponse, error) {
 	if response, err := client.makeRequest(&MesosRequest{Type: "GET_VERSION"}); err != nil {
 		return nil, err
@@ -76,10 +80,12 @@ func (client *MesosClient) GetVersion() (*MesosVersionResponse, error) {
 	}
 }
 
+// Lookup mesos masters
 func getMasters() ([]string, error) {
 	return net.LookupHost("master.mesos")
 }
 
+// Make a request to Mesos
 func (client *MesosClient) makeRequest(request *MesosRequest) (*MesosResponse, error) {
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(request); err != nil {
@@ -113,6 +119,7 @@ func (client *MesosClient) makeRequest(request *MesosRequest) (*MesosResponse, e
 	return result, nil
 }
 
+// Find Mesos leader
 func discoverMesos(mesosUri string, msgs *log.Logger) (*MesosClient, error) {
 	if mesosUri != "" {
 		client := NewMesosClient(mesosUri)
@@ -147,6 +154,7 @@ func discoverMesos(mesosUri string, msgs *log.Logger) (*MesosClient, error) {
 	}
 }
 
+// Find hosts of agents that match a predicate
 func filterAgents(resp *MesosAgentsResponse, f func(agent *MesosAgent) bool) []string {
 	var result []string
 	for _, agent := range resp.Agents {
@@ -158,6 +166,7 @@ func filterAgents(resp *MesosAgentsResponse, f func(agent *MesosAgent) bool) []s
 	return result
 }
 
+// Distinguish between "public" and "private" agents.
 func hasPublicResource(agent *MesosAgent) bool {
 	for _, resource := range agent.AgentInfo.Resources {
 		if resource.Role == "slave_public" {

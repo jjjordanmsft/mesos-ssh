@@ -11,16 +11,19 @@ import (
 	"golang.org/x/crypto/ssh/terminal"
 )
 
+// Manages authentication
 type Auth struct {
 	pw      *passwordMarshaller
 	methods []ssh.AuthMethod
 	agent   agent.Agent
 }
 
+// Sets up SSH authentication methods, password input
 func NewAuth(privateKey string, forwardAgent, authWithAgent bool) (*Auth, error) {
 	auth := &Auth{}
 	auth.pw = newPasswordMarshaller()
 
+	// Authenticate with private key?
 	if privateKey != "" {
 		contents, err := ioutil.ReadFile(privateKey)
 		if err != nil {
@@ -50,20 +53,23 @@ func NewAuth(privateKey string, forwardAgent, authWithAgent bool) (*Auth, error)
 		}
 	}
 
-	// Lastly, add password
+	// Lastly, add password prompt
 	auth.methods = append(auth.methods, ssh.PasswordCallback(auth.pw.getPassword))
 
 	return auth, nil
 }
 
+// Prompt for password if it hasn't already been entered
 func (auth *Auth) getPassword() (string, error) {
 	return auth.pw.getPassword()
 }
 
+// Gets AuthMethods for SSH login
 func (auth *Auth) getAuthMethods() []ssh.AuthMethod {
 	return auth.methods
 }
 
+// Initialize SSH agent forwarding on the specified connection
 func (auth *Auth) forwardAgent(connection *ssh.Client) error {
 	if auth.agent != nil {
 		return agent.ForwardToAgent(connection, auth.agent)
@@ -72,6 +78,8 @@ func (auth *Auth) forwardAgent(connection *ssh.Client) error {
 	}
 }
 
+// Prompts for password the first time it's asked for, returns it each
+// additional time.
 type passwordMarshaller struct {
 	requests chan passwordRequest
 }

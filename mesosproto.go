@@ -2,6 +2,8 @@ package main
 
 import "time"
 
+// Serialization format for mesos HTTP API protocol
+
 type MesosRequest struct {
 	Type           string          `json:"type"`
 	MetricsTimeout *MesosTimestamp `json:"get_metrics,omitempty"`

@@ -11,16 +11,19 @@ import (
 // Time to wait for remaining IO after process exit.
 const deadline time.Duration = 100 * time.Millisecond
 
+// Top-level IO collector for SSH output
 type IOCollector interface {
 	NewRemote(host string) *RemoteIO
 	Read()
 }
 
+// A single packet of output
 type IOMessage struct {
 	data   string
 	stream int
 }
 
+// Exists per host and sends IO to be aggregated back to IOCollector
 type RemoteIO struct {
 	host      string
 	collector chan *IOMessage
@@ -35,6 +38,7 @@ func NewRemoteIO(host string) *RemoteIO {
 	}
 }
 
+// Send data to stdout
 func (remote *RemoteIO) Stdout(data []byte) {
 	remote.collector <- &IOMessage{
 		data:   string(data),
@@ -42,6 +46,7 @@ func (remote *RemoteIO) Stdout(data []byte) {
 	}
 }
 
+// Send data to stderr
 func (remote *RemoteIO) Stderr(data []byte) {
 	remote.collector <- &IOMessage{
 		data:   string(data),
@@ -49,6 +54,7 @@ func (remote *RemoteIO) Stderr(data []byte) {
 	}
 }
 
+// Indicates an exit with return code
 func (remote *RemoteIO) Exit(code int) {
 	remote.collector <- &IOMessage{
 		data:   fmt.Sprintf("Exited with code: %d\n", code),
@@ -56,10 +62,12 @@ func (remote *RemoteIO) Exit(code int) {
 	}
 }
 
+// Indicates the client has terminated
 func (remote *RemoteIO) Done(err error) {
 	remote.done <- err
 }
 
+// io.Writer to stdout for the specified RemoteIO
 type stdoutWriter struct {
 	remote *RemoteIO
 }
@@ -69,6 +77,7 @@ func (writer *stdoutWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// io.Writer to stderr for the specified RemoteIO
 type stderrWriter struct {
 	remote *RemoteIO
 }
@@ -78,23 +87,27 @@ func (writer *stderrWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// IOCollector that displays outputs one-at-a-time after each connection closes.
 type RegularIOCollector struct {
 	results chan *IOResult
 	count   int
 }
 
+// Full output from a remote connection
 type IOResult struct {
 	host   string
 	msgs   []*IOMessage
 	result error
 }
 
+// Makes a RegularIOCollector
 func NewRegularIOCollector() IOCollector {
 	return &RegularIOCollector{
 		results: make(chan *IOResult),
 	}
 }
 
+// Creates a new RemoteIO for the specified host
 func (coll *RegularIOCollector) NewRemote(host string) *RemoteIO {
 	remote := NewRemoteIO(host)
 	coll.count++
@@ -102,6 +115,7 @@ func (coll *RegularIOCollector) NewRemote(host string) *RemoteIO {
 	return remote
 }
 
+// Collects and displays output from all RemoteIO's, then returns
 func (coll *RegularIOCollector) Read() {
 	recvd := 0
 
@@ -120,6 +134,8 @@ func (coll *RegularIOCollector) Read() {
 	close(coll.results)
 }
 
+// Reads output from a single RemoteIO, sends it all back to collector when
+// it is finished.
 func (coll *RegularIOCollector) process(remote *RemoteIO) {
 	var msgs []*IOMessage
 	var result error
@@ -161,17 +177,20 @@ wait2:
 	close(remote.done)
 }
 
+// IOCollector that interleaves output from many remote hosts as it arrives.
 type InterleavedIOCollector struct {
 	messages  chan *IOMessage
 	waitgroup sync.WaitGroup
 }
 
+// Creates an InterleavedIOCollector
 func NewInterleavedIOCollector() IOCollector {
 	return &InterleavedIOCollector{
 		messages: make(chan *IOMessage),
 	}
 }
 
+// Creates a RemoteIO that feeds the InterleavedIOCollector for the specified host.
 func (coll *InterleavedIOCollector) NewRemote(host string) *RemoteIO {
 	remote := NewRemoteIO(host)
 	coll.waitgroup.Add(1)
@@ -179,6 +198,7 @@ func (coll *InterleavedIOCollector) NewRemote(host string) *RemoteIO {
 	return remote
 }
 
+// Collects and displays output from all RemoteIO's, then returns
 func (coll *InterleavedIOCollector) Read() {
 	done := make(chan bool)
 	go func() {
@@ -198,6 +218,7 @@ func (coll *InterleavedIOCollector) Read() {
 	}
 }
 
+// Reads output from a single RemoteIO and forwards it to the InterleavedIOCollector
 func (coll *InterleavedIOCollector) process(remote *RemoteIO) {
 	defer coll.waitgroup.Done()
 	processor := &interleavedProcessor{
