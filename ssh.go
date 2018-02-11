@@ -293,6 +293,7 @@ func (sesh *SSHSession) sendFiles(dir string, files []string) error {
 
 			info, err := f.Stat()
 			if err != nil {
+				f.Close()
 				log.Printf("Failed to stat %s: %s", file, err.Error())
 				result <- err
 				return
@@ -301,6 +302,7 @@ func (sesh *SSHSession) sendFiles(dir string, files []string) error {
 			fmt.Fprintf(stdin, "C%04o %d %s\n", info.Mode().Perm(), info.Size(), path.Base(file))
 			io.Copy(stdin, f)
 			fmt.Fprintf(stdin, "\x00")
+			f.Close()
 		}
 
 		result <- nil
