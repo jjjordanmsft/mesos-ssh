@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"strings"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
@@ -13,15 +14,15 @@ import (
 
 // Manages authentication
 type Auth struct {
-	pw      *passwordMarshaller
-	methods []ssh.AuthMethod
-	agent   agent.Agent
+	pw       *passwordMarshaller
+	methods  []ssh.AuthMethod
+	agent    agent.Agent
+	password string
 }
 
 // Sets up SSH authentication methods, password input
-func NewAuth(privateKey string, forwardAgent, authWithAgent bool) (*Auth, error) {
+func NewAuth(privateKey, passwordFile string, forwardAgent, authWithAgent bool) (*Auth, error) {
 	auth := &Auth{}
-	auth.pw = newPasswordMarshaller()
 
 	// Authenticate with private key?
 	if privateKey != "" {
@@ -53,15 +54,31 @@ func NewAuth(privateKey string, forwardAgent, authWithAgent bool) (*Auth, error)
 		}
 	}
 
-	// Lastly, add password prompt
-	auth.methods = append(auth.methods, ssh.PasswordCallback(auth.pw.getPassword))
+	if passwordFile != "" {
+		// Use the contents of the passwordFile as the password
+		pw, err := ioutil.ReadFile(passwordFile)
+		if err != nil {
+			return nil, err
+		}
+
+		auth.password = strings.TrimSpace(string(pw))
+		auth.methods = append(auth.methods, ssh.Password(auth.password))
+	} else {
+		// Or just prompt for the password
+		auth.pw = newPasswordMarshaller()
+		auth.methods = append(auth.methods, ssh.PasswordCallback(auth.pw.getPassword))
+	}
 
 	return auth, nil
 }
 
 // Prompt for password if it hasn't already been entered
 func (auth *Auth) getPassword() (string, error) {
-	return auth.pw.getPassword()
+	if auth.pw == nil {
+		return auth.password, nil
+	} else {
+		return auth.pw.getPassword()
+	}
 }
 
 // Gets AuthMethods for SSH login

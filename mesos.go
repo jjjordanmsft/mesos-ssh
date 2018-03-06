@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
+	"strings"
 )
 
 // Lookup hosts for "spec" from mesos leader "mesos". Write any output to msgs.
@@ -15,39 +17,58 @@ func GetHosts(mesos, spec string, msgs *log.Logger) ([]string, error) {
 		return getMasters()
 	}
 
-	var result []string
-	mesosClient, err := discoverMesos(mesos, msgs)
-	if err != nil {
-		return result, err
-	}
-
-	agents, err := mesosClient.GetAgents()
-	if err != nil {
-		return result, err
-	}
-
-	if spec == "agents" || spec == "all" {
-		result, err = filterAgents(agents, func(ag *MesosAgent) bool { return true }), nil
+	if spec == "agents" || spec == "all" || spec == "public" || spec == "private" {
+		var result []string
+		mesosClient, err := discoverMesos(mesos, msgs)
 		if err != nil {
 			return result, err
 		}
 
-		if spec == "all" {
-			masters, err := getMasters()
+		agents, err := mesosClient.GetAgents()
+		if err != nil {
+			return result, err
+		}
+
+		if spec == "agents" || spec == "all" {
+			result, err = filterAgents(agents, func(ag *MesosAgent) bool { return true }), nil
 			if err != nil {
 				return result, err
 			}
 
-			result = append(result, masters...)
+			if spec == "all" {
+				masters, err := getMasters()
+				if err != nil {
+					return result, err
+				}
+
+				result = append(result, masters...)
+			}
+
+			return result, nil
+		} else if spec == "public" {
+			return filterAgents(agents, hasPublicResource), nil
+		} else if spec == "private" {
+			return filterAgents(agents, func(ag *MesosAgent) bool { return !hasPublicResource(ag) }), nil
+		}
+
+		return result, fmt.Errorf("Should not be reachable")
+	} else {
+		var result []string
+
+		contents, err := ioutil.ReadFile(spec)
+		if err != nil {
+			return result, err
+		}
+
+		lines := strings.Split(string(contents), "\n")
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if len(trimmed) > 0 {
+				result = append(result, trimmed)
+			}
 		}
 
 		return result, nil
-	} else if spec == "public" {
-		return filterAgents(agents, hasPublicResource), nil
-	} else if spec == "private" {
-		return filterAgents(agents, func(ag *MesosAgent) bool { return !hasPublicResource(ag) }), nil
-	} else {
-		return result, fmt.Errorf("Invalid host spec: %s", spec)
 	}
 }
 

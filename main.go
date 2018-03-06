@@ -24,6 +24,7 @@ var (
 	flagKeyfile      string
 	flagForwardAgent bool
 	flagNoAgent      bool
+	flagPasswordFile string
 	flagFiles        FileList
 	flagTimeout      time.Duration
 )
@@ -41,6 +42,7 @@ func init() {
 	flag.IntVar(&flagPort, "port", 22, "SSH port")
 	flag.BoolVar(&flagForwardAgent, "forward-agent", false, "Forwards the local SSH agent to the remote host")
 	flag.StringVar(&flagKeyfile, "key", "", "Use the specified keyfile to authenticate to the remote host")
+	flag.StringVar(&flagPasswordFile, "passfile", "", "Use the contents of the specified file as the SSH password")
 	flag.BoolVar(&flagNoAgent, "no-agent", false, "Do not use the local ssh agent to authenticate remotely")
 	flag.BoolVar(&flagSudo, "sudo", false, "Run commands as superuser on the remote machine")
 	flag.BoolVar(&flagPty, "pty", false, "Run command in a pty (automatically applied with -sudo)")
@@ -82,7 +84,7 @@ func main() {
 	log.Printf("Found hosts: %s", strings.Join(hosts, ", "))
 
 	// Set up authentication
-	auth, err := NewAuth(flagKeyfile, flagForwardAgent, !flagNoAgent)
+	auth, err := NewAuth(flagKeyfile, flagPasswordFile, flagForwardAgent, !flagNoAgent)
 	if err != nil {
 		msgs.Fatalf("Failed to initialize auth: %s", err.Error())
 	}
