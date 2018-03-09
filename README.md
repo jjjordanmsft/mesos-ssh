@@ -25,6 +25,8 @@ Usage: ./mesos-ssh [OPTIONS] <masters|public|private|agents|all> <cmd>
         Address of Mesos leader (default "http://leader.mesos:5050")
   -no-agent
         Do not use the local ssh agent to authenticate remotely
+  -passfile string
+        Use the contents of the specified file as the SSH password
   -port int
         SSH port (default 22)
   -pty
@@ -46,6 +48,7 @@ The options are:
 * `masters`: All masters.
 * `public`: Agents with a role called `slave_public`
 * `private`: Agents without a role called `slave_public`.
+* `<file>`: Connect to IP addresses listed in this file.
 
 `mesos-ssh` finds masters via a DNS lookup on `master.mesos`, and finds
 agents by querying the Mesos REST API.
