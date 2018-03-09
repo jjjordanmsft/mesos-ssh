@@ -220,10 +220,10 @@ func (sesh *SSHSession) writePass(stdin io.WriteCloser, stdout io.Reader) {
 			break
 		}
 
-		if buf.Len() > 64 {
-			// Should be first thing. If we haven't seen it, then just
-			// fuggheddaboudit.
-			log.Println("No sudo prompt found in first 64 bytes, skipping.")
+		if buf.Len() > 256 {
+			// Should be early, but sudo might print out warning messages, e.g. if DNS resolution
+			// is funky on the box.  But if it goes too far out, then don't bother.
+			log.Println("No sudo prompt found in first 256 bytes, skipping.")
 			break
 		}
 	}
